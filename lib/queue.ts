@@ -4,6 +4,9 @@ import { redis } from './redis';
 
 export const VIDEO_PROCESSING_QUEUE = 'video-processing';
 
+// Job names handled on the queue.
+export const ANALYZE_JOB = 'analyze';
+
 export const videoProcessingQueue = new Queue(VIDEO_PROCESSING_QUEUE, {
   connection: redis,
   defaultJobOptions: {
@@ -13,3 +16,8 @@ export const videoProcessingQueue = new Queue(VIDEO_PROCESSING_QUEUE, {
     backoff: { type: 'exponential', delay: 1000 },
   },
 });
+
+/** Enqueue transcription + highlight analysis for a project. */
+export function enqueueAnalyze(projectId: string) {
+  return videoProcessingQueue.add(ANALYZE_JOB, { projectId });
+}

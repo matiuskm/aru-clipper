@@ -9,6 +9,20 @@ Fase ini fokus pada **core AI processing** dari sistem AI Shorts Generator:
 
 Ini adalah salah satu fase tersulit dan paling penting karena melibatkan integrasi AI (Whisper + Gemini), queue processing, dan cost optimization.
 
+> **⚠️ Catatan implementasi (status aktual, 2026-06-19):**
+> Fase ini sudah diimplementasikan dan diverifikasi end-to-end. Penyesuaian terhadap draft di bawah:
+> 1. **Sumber media = local storage** (lanjutan Phase 2). Job membaca file video dari disk (`metadata.storageKey`), bukan dari URL R2. Project YouTube (tanpa file lokal) ditolak dengan 400 — download media-nya ditunda ke fase berikutnya.
+> 2. **Ekstraksi audio dulu** sebelum transkripsi: `lib/media.ts` memakai binary `ffmpeg-static` (spawn langsung, tanpa ffprobe) untuk meng-extract MP3 mono 16 kHz + membaca durasi video. File audio sementara dibersihkan di `finally`.
+> 3. **AI via REST, bukan SDK.** `lib/ai.ts` memanggil Groq Whisper (`/openai/v1/audio/transcriptions`) dan Gemini (`generateContent`) langsung dengan `fetch` — tidak menambah dependency `groq-sdk`/`@google/generative-ai`. Output Gemini dipaksa JSON (`responseMimeType: application/json`) lalu divalidasi & di-clamp dengan Zod (`parseHighlights`).
+> 4. **Mock fallback + `AI_MOCK`.** Jika `GROQ_API_KEY`/`GEMINI_API_KEY` kosong (atau `AI_MOCK=1`), step tersebut memakai output mock deterministik. Saat ini key Groq belum diisi (transkrip = mock), key Gemini aktif (analisis = real). Ini bikin pipeline bisa dites offline & gratis.
+> 5. **Model Gemini default `gemini-2.5-flash`** (override via `GEMINI_MODEL`). Draft memakai `gemini-1.5-flash` yang sudah retired untuk API key ini — diganti.
+> 6. **Satu queue.** Memakai queue `video-processing` yang sudah ada dengan job name `analyze` (`enqueueAnalyze()`), bukan queue terpisah `analyze`. Worker dispatch berdasarkan `job.name`, `concurrency: 2`.
+> 7. **Idempotent.** Di awal job, transcript & clip lama untuk project itu dihapus, jadi retry BullMQ / re-analyze tidak menumpuk duplikat.
+> 8. **Auth & ownership** di route trigger (`POST /api/projects/[id]/analyze`) memakai Auth.js v5 + cek kepemilikan, plus status `queued` sebelum di-enqueue. Frontend: tombol "Analyze & Generate Clips" + polling status + daftar clips di halaman detail project.
+> 9. **Status flow aktual:** `queued → transcribing → analyzing → completed` (atau `failed`).
+>
+> Bagian di bawah adalah draft rencana awal; baca dengan penyesuaian di atas.
+
 ## Estimasi Waktu (Vibe Coding)
 **8 – 14 hari** (tergantung seberapa dalam kamu ingin eksperimen dengan prompt Gemini).
 
@@ -267,14 +281,26 @@ Gunakan polling atau WebSocket (nanti di fase selanjutnya) untuk update status.
 
 ## Validation Checklist (Akhir Fase)
 
-- [ ] Prisma schema untuk Transcript & Clip sudah di-migrate
-- [ ] `lib/ai.ts` berfungsi (bisa transcribe dan analyze)
-- [ ] Job `analyze` berhasil diproses via BullMQ
-- [ ] Transcript tersimpan di database sebagai JSON
-- [ ] 5–10 clip otomatis terbuat dengan start, end, score, dan hookText
-- [ ] Status project berubah dengan benar (transcribing → analyzing → completed)
-- [ ] Error handling bekerja (project status jadi 'failed' jika error)
-- [ ] Bisa trigger dari frontend dan melihat hasilnya di database
+- [x] Prisma schema Transcript & Clip di-update (`hookText`, `status`, `updatedAt`, `onDelete: Cascade`) & pushed
+- [x] `lib/ai.ts` berfungsi: transcribe (Groq, +mock) dan analyze (Gemini real, +mock) — divalidasi Zod
+- [x] `lib/media.ts` ekstraksi audio + durasi via ffmpeg-static
+- [x] Job `analyze` diproses via BullMQ (queue `video-processing`, worker concurrency 2)
+- [x] Transcript tersimpan di database sebagai JSON
+- [x] Clip otomatis terbuat dengan start, end, score, dan hookText
+- [x] Status project berubah benar (queued → transcribing → analyzing → completed)
+- [x] Error handling bekerja (status jadi 'failed' jika error; job idempotent saat retry)
+- [x] Trigger dari frontend (tombol + polling) dan hasil tersimpan di DB
+- [ ] Code ter-commit
+
+> **Hasil test E2E:**
+> - **Pipeline penuh (AI_MOCK=1, deterministik) — 8/8 passed:** login → upload video (ada audio) →
+>   401 saat unauth → trigger analyze (200 + jobId) → poll sampai `completed` (~4s) →
+>   3 clips dengan hookText+score → DB berisi transcript (6 segmen) + 3 clips →
+>   analyze project YouTube ditolak 400.
+> - **Real Gemini lewat worker:** project selesai `completed` dengan clips ter-generate dari API live
+>   (`gemini-2.5-flash`). Catatan: Gemini sempat balas `503 UNAVAILABLE` (overload sementara) saat run pertama —
+>   transient, bukan bug; retry berhasil.
+> - **Unit:** `extractAudio`/`getDuration` (6s, mp3 ~49KB), `parseHighlights` (strip fence + clamp).
 
 ## Catatan Penting
 - Gunakan **Gemini 1.5 Flash** untuk development (lebih cepat & murah).

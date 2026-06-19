@@ -46,9 +46,10 @@ model Project {
 model Transcript {
   id             String   @id @default(cuid())
   projectId      String
-  transcriptJson Json
+  transcriptJson Json     // Array of { start, end, text }
   createdAt      DateTime @default(now())
-  project        Project  @relation(fields: [projectId], references: [id])
+  updatedAt      DateTime @updatedAt
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model Clip {
@@ -57,8 +58,11 @@ model Clip {
   title       String
   startSecond Int
   endSecond   Int
-  score       Int
+  score       Int      // confidence score 0-100
+  hookText    String?  // AI-generated hook line
   renderUrl   String?
+  status      String   @default("pending") // pending | processing | completed | failed
   createdAt   DateTime @default(now())
-  project     Project  @relation(fields: [projectId], references: [id])
+  updatedAt   DateTime @updatedAt
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }

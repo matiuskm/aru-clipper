@@ -4,6 +4,7 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { StatusBadge } from '@/components/status-badge';
 import { DeleteButton } from './delete-button';
+import { AnalyzePanel } from './analyze-panel';
 
 export default async function ProjectDetailPage({
   params,
@@ -109,13 +110,20 @@ export default async function ProjectDetailPage({
         </dl>
       </section>
 
-      {/* Clips placeholder */}
-      <section className="rounded-xl border border-black/10 p-5 dark:border-white/15">
-        <h2 className="mb-1 font-medium">Clips ({project.clips.length})</h2>
-        <p className="text-sm text-black/50 dark:text-white/50">
-          Clips akan muncul setelah processing pipeline (Phase 3+) selesai.
-        </p>
-      </section>
+      {/* Analysis + clips */}
+      <AnalyzePanel
+        projectId={project.id}
+        hasVideo={Boolean((project.metadata as { storageKey?: string } | null)?.storageKey)}
+        initialStatus={project.status}
+        initialClips={project.clips.map((c) => ({
+          id: c.id,
+          title: c.title,
+          hookText: c.hookText,
+          startSecond: c.startSecond,
+          endSecond: c.endSecond,
+          score: c.score,
+        }))}
+      />
     </main>
   );
 }

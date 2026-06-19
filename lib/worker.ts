@@ -1,19 +1,24 @@
 // lib/worker.ts
 import { Worker } from 'bullmq';
 import { redis } from './redis';
-import { VIDEO_PROCESSING_QUEUE } from './queue';
+import { VIDEO_PROCESSING_QUEUE, ANALYZE_JOB } from './queue';
+import { processAnalyzeJob } from './jobs/analyze-job';
 
 export const videoWorker = new Worker(
   VIDEO_PROCESSING_QUEUE,
   async (job) => {
-    console.log(`Processing job ${job.id} with data:`, job.data);
+    console.log(`Processing job ${job.id} (${job.name}) with data:`, job.data);
 
-    // TODO: Logic processing akan ditambahkan di fase selanjutnya
-    // Contoh: transcription, highlight detection, dll.
-
-    return { success: true, message: 'Job completed' };
+    switch (job.name) {
+      case ANALYZE_JOB:
+        return processAnalyzeJob(job);
+      default:
+        console.warn(`No handler for job "${job.name}" — skipping`);
+        return { success: true, skipped: true };
+    }
   },
-  { connection: redis }
+  // Keep concurrency modest — AI calls are the bottleneck/cost driver.
+  { connection: redis, concurrency: 2 }
 );
 
 videoWorker.on('completed', (job) => {
