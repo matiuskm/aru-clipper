@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  // Hashed password for credentials-based auth (added for Phase 1 register/login).
+  password  String?
+  createdAt DateTime @default(now())
+  projects  Project[]
+  apiKeys   ApiKey[]
+}
+
+model ApiKey {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String
+  encryptedKey String
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id])
+}
+
+model Project {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  sourceType  String    // "upload" | "youtube"
+  sourceUrl   String?
+  videoUrl    String?
+  status      String    // "pending" | "analyzing" | "completed" dll
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id])
+  transcripts Transcript[]
+  clips       Clip[]
+}
+
+model Transcript {
+  id             String   @id @default(cuid())
+  projectId      String
+  transcriptJson Json
+  createdAt      DateTime @default(now())
+  project        Project  @relation(fields: [projectId], references: [id])
+}
+
+model Clip {
+  id          String   @id @default(cuid())
+  projectId   String
+  title       String
+  startSecond Int
+  endSecond   Int
+  score       Int
+  renderUrl   String?
+  createdAt   DateTime @default(now())
+  project     Project  @relation(fields: [projectId], references: [id])
+}
