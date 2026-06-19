@@ -81,6 +81,11 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/files/[...ke
   const contentType = MIME[path.extname(key).toLowerCase()] ?? 'application/octet-stream';
   const range = req.headers.get('range');
 
+  // Force a download (vs inline playback) when ?download=1 is passed.
+  const downloadHeaders: Record<string, string> = req.nextUrl.searchParams.has('download')
+    ? { 'Content-Disposition': `attachment; filename="${path.basename(key)}"` }
+    : {};
+
   // Honor HTTP range requests so <video> can seek and stream efficiently.
   if (range) {
     const match = /bytes=(\d+)-(\d*)/.exec(range);
@@ -101,6 +106,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/files/[...ke
           'Content-Length': String(end - start + 1),
           'Content-Range': `bytes ${start}-${end}/${stat.size}`,
           'Accept-Ranges': 'bytes',
+          ...downloadHeaders,
         },
       });
     }
@@ -113,6 +119,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/files/[...ke
       'Content-Type': contentType,
       'Content-Length': String(stat.size),
       'Accept-Ranges': 'bytes',
+      ...downloadHeaders,
     },
   });
 }

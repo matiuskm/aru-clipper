@@ -6,6 +6,18 @@ Kita akan membersihkan code, menambahkan error handling yang baik, progress trac
 
 **Estimasi Waktu (Vibe Coding):** 5 – 10 hari
 
+> **⚠️ Catatan implementasi (status aktual, 2026-06-19):**
+> Banyak item Phase 5 sudah tercicil di fase sebelumnya. Yang ditambahkan/diselesaikan di fase ini:
+> 1. **Error message ke user**: kolom `errorMessage` di `Project` & `Clip`; job mengisi pesan ramah (`lib/error.ts` memetakan Groq 429 / Gemini 503 / ffmpeg dll ke teks Indonesia). Ditampilkan di UI: banner merah saat analisis gagal + pesan per-clip yang gagal.
+> 2. **Download MP4**: route `/api/files` mendukung `?download=1` (Content-Disposition attachment); tombol **Download** per clip di UI.
+> 3. **Progress tracking**: stepper 4 tahap + spinner + timer elapsed (dibuat di iterasi sebelumnya), polling sadar-render.
+> 4. **Error handling robust**: retry transient AI (Gemini 429/500/503) in-call, BullMQ backoff 10s/20s, transcript di-reuse agar retry tidak membakar kuota Groq, status `failed` + pesan.
+> 5. **Validasi env** (`lib/env.ts`, Zod): `DATABASE_URL`/`REDIS_URL`/`AUTH_SECRET` wajib; AI key opsional (warning, ada mock fallback). Dipanggil saat worker start.
+> 6. **README** diperbarui jadi panduan MVP lengkap (run lokal, env, alur pemakaian, arsitektur).
+> 7. **Cost/perf**: Gemini Flash (`gemini-2.5-flash`), transcript cache/reuse, ffmpeg `-preset veryfast`, audio 16kHz mono untuk Whisper.
+>
+> Belum dikerjakan (di luar scope MVP / opsional): rate limiting (upstash), unit test suite formal (Jest/Supertest) — verifikasi dilakukan lewat skrip E2E manual tiap fase, tabel `ApiKey` (BYOK) masih placeholder.
+
 ## Langkah-langkah Detail
 
 ### 1. Progress Tracking & Job Status
@@ -95,16 +107,21 @@ try {
 - Basic logging (Pino atau Winston).
 
 ### 7. MVP Completion Checklist
-- [ ] User bisa upload video lokal
-- [ ] User bisa import dari YouTube
-- [ ] Transcript berhasil dibuat
-- [ ] Highlight detection & clip generation (minimal 5 clips)
-- [ ] Auto subtitles + hook text
-- [ ] Rendering MP4 berhasil
-- [ ] Download clip
-- [ ] Progress tracking terlihat
-- [ ] Error handling graceful
-- [ ] UI/UX sudah cukup baik untuk demo
+- [x] User bisa upload video lokal
+- [x] User bisa import dari YouTube (metadata; analisis menyusul untuk YouTube)
+- [x] Transcript berhasil dibuat (Whisper, word-level)
+- [x] Highlight detection & clip generation (5–10 clips, Gemini)
+- [x] Auto subtitles (burned-in) + hook text
+- [x] Rendering MP4 berhasil (9:16, blur bg)
+- [x] Download clip (`?download=1`)
+- [x] Progress tracking terlihat (stepper + timer)
+- [x] Error handling graceful (errorMessage + retry)
+- [x] UI/UX cukup baik untuk demo
+- [ ] Code ter-commit
+
+> **Smoke test E2E (mock):** upload → analyze (`completed`) → render semua
+> (`completed`) → header download benar (`attachment` saat `?download=1`, inline tanpa).
+> tsc & eslint bersih.
 
 ## Hasil Akhir yang Diharapkan
 1. Aplikasi bisa dipakai end-to-end tanpa crash fatal.

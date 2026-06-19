@@ -11,6 +11,7 @@ import { prisma } from '../prisma';
 import { resolveKey } from '../storage';
 import { extractAudio } from '../media';
 import { transcribeAudio, analyzeHighlights, type Segment } from '../ai';
+import { friendlyError } from '../error';
 
 export interface AnalyzeJobData {
   projectId: string;
@@ -100,14 +101,17 @@ export async function processAnalyzeJob(job: Job<AnalyzeJobData>) {
 
     await prisma.project.update({
       where: { id: projectId },
-      data: { status: 'completed' },
+      data: { status: 'completed', errorMessage: null },
     });
 
     return { transcriptSegments: transcript.length, clips: highlights.length };
   } catch (err) {
     console.error(`[analyze-job] project ${projectId} failed:`, err);
     await prisma.project
-      .update({ where: { id: projectId }, data: { status: 'failed' } })
+      .update({
+        where: { id: projectId },
+        data: { status: 'failed', errorMessage: friendlyError(err) },
+      })
       .catch(() => {});
     throw err;
   } finally {

@@ -12,6 +12,7 @@ interface Clip {
   score: number;
   status: string;
   renderUrl: string | null;
+  errorMessage: string | null;
 }
 
 const ACTIVE = ['queued', 'transcribing', 'analyzing'];
@@ -27,14 +28,17 @@ export function AnalyzePanel({
   hasVideo,
   initialStatus,
   initialClips,
+  initialError,
 }: {
   projectId: string;
   hasVideo: boolean;
   initialStatus: string;
   initialClips: Clip[];
+  initialError: string | null;
 }) {
   const [status, setStatus] = useState(initialStatus);
   const [clips, setClips] = useState<Clip[]>(initialClips);
+  const [projectError, setProjectError] = useState<string | null>(initialError);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
@@ -59,6 +63,7 @@ export function AnalyzePanel({
     const { project } = await res.json();
     setStatus(project.status);
     setClips(project.clips ?? []);
+    setProjectError(project.errorMessage ?? null);
   }, [projectId]);
 
   // Poll while analysis is running or any clip is rendering.
@@ -130,6 +135,12 @@ export function AnalyzePanel({
 
       {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
 
+      {status === 'failed' && projectError && (
+        <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+          <span className="font-medium">Analisis gagal:</span> {projectError}
+        </div>
+      )}
+
       {(busy || anyRendering) && (
         <Progress
           status={busy ? status : 'rendering'}
@@ -174,21 +185,34 @@ export function AnalyzePanel({
                 {c.hookText && (
                   <p className="text-sm text-black/60 dark:text-white/60">“{c.hookText}”</p>
                 )}
-                <div className="mt-auto flex items-center justify-between pt-1">
+                {c.status === 'failed' && c.errorMessage && (
+                  <p className="text-xs text-red-500">{c.errorMessage}</p>
+                )}
+                <div className="mt-auto flex items-center justify-between gap-2 pt-1">
                   <span className="text-xs text-black/50 dark:text-white/50">
                     {fmt(c.startSecond)} – {fmt(c.endSecond)} · {c.endSecond - c.startSecond}s
                   </span>
-                  <button
-                    onClick={() => renderOne(c.id)}
-                    disabled={c.status === 'rendering' || starting}
-                    className="rounded border border-black/15 px-2 py-1 text-xs disabled:opacity-50 dark:border-white/20"
-                  >
-                    {c.status === 'rendering'
-                      ? 'Merender…'
-                      : c.renderUrl
-                        ? 'Render ulang'
-                        : 'Render'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {c.renderUrl && (
+                      <a
+                        href={`${c.renderUrl}?download=1`}
+                        className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/20"
+                      >
+                        Download
+                      </a>
+                    )}
+                    <button
+                      onClick={() => renderOne(c.id)}
+                      disabled={c.status === 'rendering' || starting}
+                      className="rounded border border-black/15 px-2 py-1 text-xs disabled:opacity-50 dark:border-white/20"
+                    >
+                      {c.status === 'rendering'
+                        ? 'Merender…'
+                        : c.renderUrl
+                          ? 'Render ulang'
+                          : 'Render'}
+                    </button>
+                  </div>
                 </div>
               </li>
             ))}

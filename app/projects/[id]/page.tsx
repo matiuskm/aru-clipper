@@ -115,6 +115,7 @@ export default async function ProjectDetailPage({
         projectId={project.id}
         hasVideo={Boolean((project.metadata as { storageKey?: string } | null)?.storageKey)}
         initialStatus={project.status}
+        initialError={project.errorMessage}
         initialClips={project.clips.map((c) => ({
           id: c.id,
           title: c.title,
@@ -124,6 +125,7 @@ export default async function ProjectDetailPage({
           score: c.score,
           status: c.status,
           renderUrl: c.renderUrl,
+          errorMessage: c.errorMessage,
         }))}
       />
     </main>

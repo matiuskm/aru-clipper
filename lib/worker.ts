@@ -1,6 +1,9 @@
 // lib/worker.ts
 import { Worker } from 'bullmq';
+import { validateEnv } from './env';
 import { redis } from './redis';
+
+validateEnv();
 import { VIDEO_PROCESSING_QUEUE, ANALYZE_JOB, RENDER_CLIP_JOB } from './queue';
 import { processAnalyzeJob } from './jobs/analyze-job';
 import { processRenderClipJob } from './jobs/render-clip-job';

@@ -9,6 +9,7 @@ import { prisma } from '../prisma';
 import { resolveKey, buildClipKey, ensureKeyPath, publicUrl } from '../storage';
 import { renderShortClip, type SubtitleCue } from '../ffmpeg';
 import type { Segment } from '../ai';
+import { friendlyError } from '../error';
 
 export interface RenderClipJobData {
   clipId: string;
@@ -87,14 +88,17 @@ export async function processRenderClipJob(job: Job<RenderClipJobData>) {
 
     const updated = await prisma.clip.update({
       where: { id: clipId },
-      data: { renderUrl: publicUrl(key), status: 'completed' },
+      data: { renderUrl: publicUrl(key), status: 'completed', errorMessage: null },
     });
 
     return { clipId, renderUrl: updated.renderUrl };
   } catch (err) {
     console.error(`[render-clip-job] clip ${clipId} failed:`, err);
     await prisma.clip
-      .update({ where: { id: clipId }, data: { status: 'failed' } })
+      .update({
+        where: { id: clipId },
+        data: { status: 'failed', errorMessage: friendlyError(err) },
+      })
       .catch(() => {});
     throw err;
   }
