@@ -45,9 +45,15 @@ export async function processAnalyzeJob(job: Job<AnalyzeJobData>) {
       where: { projectId },
       orderBy: { createdAt: 'desc' },
     });
+    // Reuse only a "new format" transcript (has word-level timings). Older ones
+    // are re-transcribed once to upgrade captions; retries after that reuse it.
+    const existingSegments = existing
+      ? (existing.transcriptJson as unknown as Segment[])
+      : null;
+    const hasWords = !!existingSegments?.some((s) => (s.words?.length ?? 0) > 0);
 
-    if (existing) {
-      transcript = existing.transcriptJson as unknown as Segment[];
+    if (existingSegments && hasWords) {
+      transcript = existingSegments;
     } else {
       await prisma.project.update({
         where: { id: projectId },
@@ -57,6 +63,8 @@ export async function processAnalyzeJob(job: Job<AnalyzeJobData>) {
       audioPath = extracted.audioPath;
       durationSec = extracted.durationSec;
       transcript = await transcribeAudio(audioPath);
+      // Replace any stale (word-less) transcript so we don't accumulate dupes.
+      await prisma.transcript.deleteMany({ where: { projectId } });
       await prisma.transcript.create({
         data: { projectId, transcriptJson: transcript as unknown as Prisma.InputJsonValue },
       });

@@ -14,10 +14,38 @@ export interface RenderClipJobData {
   clipId: string;
 }
 
-/** Pick transcript segments inside [start, end] and rebase to clip-relative time. */
-export function cuesForWindow(segments: Segment[], start: number, end: number): SubtitleCue[] {
-  return segments
-    .filter((s) => s.end > start && s.start < end)
+/**
+ * Build caption cues for the clip window [start, end], rebased to clip-relative
+ * time. Prefers word-level timing (accurate sync, grouped into short phrases);
+ * falls back to whole segments for transcripts without word data.
+ */
+export function cuesForWindow(
+  segments: Segment[],
+  start: number,
+  end: number,
+  wordsPerCue = 5
+): SubtitleCue[] {
+  const inWindow = segments.filter((s) => s.end > start && s.start < end);
+  const words = inWindow
+    .flatMap((s) => s.words ?? [])
+    .filter((w) => w.end > start && w.start < end && w.text);
+
+  // Word-level path: group consecutive words into short, well-timed cues.
+  if (words.length > 0) {
+    const cues: SubtitleCue[] = [];
+    for (let i = 0; i < words.length; i += wordsPerCue) {
+      const group = words.slice(i, i + wordsPerCue);
+      cues.push({
+        start: Math.max(0, group[0].start - start),
+        end: Math.min(end, group[group.length - 1].end) - start,
+        text: group.map((w) => w.text).join(' '),
+      });
+    }
+    return cues.filter((c) => c.end > c.start && c.text.trim());
+  }
+
+  // Fallback: segment-level cues (older transcripts without word timings).
+  return inWindow
     .map((s) => ({
       start: Math.max(0, s.start - start),
       end: Math.min(end, s.end) - start,

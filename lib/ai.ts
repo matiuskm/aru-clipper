@@ -11,10 +11,17 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import { z } from 'zod';
 
+export interface Word {
+  start: number;
+  end: number;
+  text: string;
+}
+
 export interface Segment {
   start: number;
   end: number;
   text: string;
+  words?: Word[]; // word-level timing for accurate captions (when available)
 }
 
 export interface Highlight {
@@ -52,7 +59,9 @@ export async function transcribeAudio(audioPath: string): Promise<Segment[]> {
   );
   form.append('model', GROQ_MODEL);
   form.append('response_format', 'verbose_json');
+  // Request both granularities: segments drive analysis, words drive captions.
   form.append('timestamp_granularities[]', 'segment');
+  form.append('timestamp_granularities[]', 'word');
 
   const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST',
@@ -66,11 +75,22 @@ export async function transcribeAudio(audioPath: string): Promise<Segment[]> {
 
   const data = (await res.json()) as {
     segments?: Array<{ start: number; end: number; text: string }>;
+    words?: Array<{ word?: string; text?: string; start: number; end: number }>;
   };
+
+  // Keep precise float timings (no rounding) so captions stay in sync.
+  const words: Word[] = (data.words ?? []).map((w) => ({
+    start: w.start,
+    end: w.end,
+    text: (w.word ?? w.text ?? '').trim(),
+  }));
+
   return (data.segments ?? []).map((s) => ({
-    start: Math.floor(s.start),
-    end: Math.ceil(s.end),
+    start: s.start,
+    end: s.end,
     text: s.text.trim(),
+    // Attach the words that fall inside this segment's time range.
+    words: words.filter((w) => w.start >= s.start - 0.05 && w.start < s.end + 0.05),
   }));
 }
 
@@ -91,7 +111,7 @@ function buildPrompt(transcript: Segment[], durationSec: number): string {
 Analisis transcript berikut dan berikan 5-10 highlight terbaik.
 
 Transcript (JSON, detik):
-${JSON.stringify(transcript)}
+${JSON.stringify(transcript.map((s) => ({ start: s.start, end: s.end, text: s.text })))}
 
 Durasi video: ${durationSec} detik.
 
