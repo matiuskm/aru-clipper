@@ -10,7 +10,7 @@ import { promises as fs } from 'fs';
 import { prisma } from '../prisma';
 import { resolveKey } from '../storage';
 import { extractAudio } from '../media';
-import { transcribeAudio, analyzeHighlights } from '../ai';
+import { transcribeAudio, analyzeHighlights, type Segment } from '../ai';
 
 export interface AnalyzeJobData {
   projectId: string;
@@ -32,23 +32,35 @@ export async function processAnalyzeJob(job: Job<AnalyzeJobData>) {
   try {
     const videoPath = resolveKey(storageKey);
 
-    // Idempotency: clear any prior results so retries / re-analyze don't pile up.
+    // Idempotency: clear prior clips so re-analyze / retries don't pile up.
+    // NOTE: transcripts are NOT cleared — transcription is expensive and rate
+    // limited (Groq). On a retry (e.g. Gemini 503) we reuse the existing one
+    // instead of burning quota re-transcribing.
     await prisma.clip.deleteMany({ where: { projectId } });
-    await prisma.transcript.deleteMany({ where: { projectId } });
 
-    // 1. Transcribe -----------------------------------------------------------
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { status: 'transcribing' },
+    // 1. Transcribe (or reuse) ------------------------------------------------
+    let transcript: Segment[];
+    let durationSec = 0;
+    const existing = await prisma.transcript.findFirst({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
     });
 
-    const { audioPath: ap, durationSec } = await extractAudio(videoPath);
-    audioPath = ap;
-    const transcript = await transcribeAudio(audioPath);
-
-    await prisma.transcript.create({
-      data: { projectId, transcriptJson: transcript as unknown as Prisma.InputJsonValue },
-    });
+    if (existing) {
+      transcript = existing.transcriptJson as unknown as Segment[];
+    } else {
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'transcribing' },
+      });
+      const extracted = await extractAudio(videoPath);
+      audioPath = extracted.audioPath;
+      durationSec = extracted.durationSec;
+      transcript = await transcribeAudio(audioPath);
+      await prisma.transcript.create({
+        data: { projectId, transcriptJson: transcript as unknown as Prisma.InputJsonValue },
+      });
+    }
 
     // Persist detected duration for downstream phases.
     const duration = durationSec || transcript.at(-1)?.end || 0;

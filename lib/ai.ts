@@ -146,14 +146,25 @@ export async function analyzeHighlights(
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: buildPrompt(transcript, durationSec) }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.7 },
-    }),
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: buildPrompt(transcript, durationSec) }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.7 },
   });
+
+  // Retry transient overload/rate-limit responses with exponential backoff.
+  const RETRYABLE = new Set([429, 500, 503]);
+  let res!: Response;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    if (res.ok || !RETRYABLE.has(res.status) || attempt === 3) break;
+    const wait = 2000 * 2 ** attempt; // 2s, 4s, 8s
+    console.warn(`[ai] Gemini ${res.status}, retrying in ${wait}ms (attempt ${attempt + 1})`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
 
   if (!res.ok) {
     throw new Error(`Gemini analysis failed (${res.status}): ${await res.text()}`);

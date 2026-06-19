@@ -14,7 +14,7 @@ export const videoProcessingQueue = new Queue(VIDEO_PROCESSING_QUEUE, {
     removeOnComplete: true,
     removeOnFail: { count: 5 },
     attempts: 3,
-    backoff: { type: 'exponential', delay: 1000 },
+    backoff: { type: 'exponential', delay: 10000 }, // 10s, 20s — ride out API spikes
   },
 });
 
