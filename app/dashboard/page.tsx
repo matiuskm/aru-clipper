@@ -34,9 +34,15 @@ export default async function DashboardPage() {
         </p>
       </section>
 
-      <p className="text-sm text-black/60 dark:text-white/60">
-        🎉 Foundation siap. Fitur project & upload akan ditambahkan di Fase 2.
-      </p>
+      <a
+        href="/projects"
+        className="rounded-xl border border-black/10 p-6 transition hover:border-black/30 dark:border-white/15 dark:hover:border-white/40"
+      >
+        <p className="font-medium">Projects →</p>
+        <p className="mt-1 text-sm text-black/60 dark:text-white/60">
+          Upload video lokal atau import dari YouTube, lalu kelola project kamu.
+        </p>
+      </a>
     </main>
   );
 }

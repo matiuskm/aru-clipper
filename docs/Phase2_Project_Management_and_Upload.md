@@ -3,12 +3,23 @@
 ## Tujuan Fase Ini
 Membangun sistem manajemen proyek dasar dan fitur upload video (baik lokal maupun dari YouTube). Pada akhir fase ini, user sudah bisa:
 - Membuat project baru
-- Upload video lokal ke Cloudflare R2
+- Upload video lokal (disimpan ke **local storage** — pengganti Cloudflare R2 untuk saat ini)
 - Import video dari YouTube URL
 - Melihat daftar project
 - Melihat detail project (termasuk status dan video preview)
 
 Ini adalah fondasi untuk processing pipeline selanjutnya.
+
+> **⚠️ Catatan implementasi (status aktual, 2026-06-19):**
+> Fase ini sudah diimplementasikan dengan beberapa penyesuaian terhadap rencana awal. Yang berbeda dari draft di bawah:
+> 1. **Storage**: memakai **filesystem lokal** (`lib/storage.ts`) sebagai pengganti Cloudflare R2. File disimpan di `./storage/videos/<projectId>/...` dan di-serve lewat route terproteksi `GET /api/files/[...key]` (mendukung HTTP Range untuk streaming `<video>`). Swap ke R2 nanti cukup mengganti `lib/storage.ts` + route file-serving. `lib/r2.ts` (sudah ada) dibiarkan untuk fase migrasi.
+> 2. **Auth**: memakai **Auth.js v5** (`import { auth } from '@/auth'`), bukan `getServerSession()` dari next-auth v4. Pola: `const session = await auth(); if (!session?.user) ...`.
+> 3. **YouTube import**: di-simplify tanpa `yt-dlp`. Metadata (judul + thumbnail + channel) diambil via endpoint **oEmbed publik** YouTube (`https://www.youtube.com/oembed`), tanpa API key dan tanpa download video. Project disimpan dengan `status: 'pending'`; download/stream media asli ke storage ditunda ke worker (fase berikutnya).
+> 4. **Schema**: `Project.id` memakai `cuid()` (konsisten dengan model lain), ada kolom `metadata Json?` dan `updatedAt`. `videoUrl` menyimpan URL relatif `/api/files/...`.
+> 5. **UI**: memakai **Tailwind biasa** mengikuti gaya halaman login/register yang sudah ada (shadcn/ui belum terpasang di project ini).
+> 6. **Next.js 16**: route handler dinamis memakai `RouteContext<'/path'>` dan `params` berupa Promise (`const { id } = await ctx.params`). Auth check dilakukan per-route/page (belum ada `middleware.ts`).
+>
+> Bagian di bawah adalah draft rencana awal; baca dengan penyesuaian di atas.
 
 ## Estimasi Waktu (Vibe Coding)
 **5 – 8 hari** (tergantung pengalaman dengan file upload dan yt-dlp).
@@ -19,7 +30,7 @@ Pastikan Phase 1 (Foundation & Setup) sudah selesai dan berjalan dengan baik:
 - Prisma + PostgreSQL terhubung
 - Auth sudah aktif
 - Redis + BullMQ sudah setup
-- Cloudflare R2 terkonfigurasi (R2 client)
+- ~~Cloudflare R2 terkonfigurasi~~ → diganti **local storage** (`lib/storage.ts`) untuk fase ini; tidak perlu kredensial R2
 
 ## Langkah-langkah Detail
 
@@ -238,21 +249,29 @@ Gunakan shadcn/ui components: Card, Button, Input, Progress, dll.
 ## Hasil Akhir yang Diharapkan
 
 1. User bisa login dan melihat dashboard project.
-2. Bisa membuat project baru via upload lokal → file tersimpan di R2, record di DB.
+2. Bisa membuat project baru via upload lokal → file tersimpan di local storage (`./storage`), record di DB.
 3. Bisa import dari YouTube URL → project tercatat.
 4. API endpoints berfungsi dan return data sesuai.
 5. Status project ter-update dengan benar (`pending`, `uploading`, `uploaded`, dll).
 
 ## Validation Checklist
 
-- [ ] Prisma schema `Project` sudah terupdate dan migrate berhasil
-- [ ] GET /api/projects mengembalikan list project user
-- [ ] POST /api/projects/upload berhasil simpan video ke R2 dan DB
-- [ ] POST /api/projects/youtube berhasil buat project
-- [ ] Frontend form upload dan import berfungsi
-- [ ] Video URL di R2 bisa diakses (public)
-- [ ] Error handling dasar sudah ada
+- [x] Prisma schema `Project` sudah terupdate dan migrate berhasil (`metadata`, `updatedAt`, default status)
+- [x] GET /api/projects mengembalikan list project user (+ `_count.clips`)
+- [x] POST /api/projects (create metadata) + validasi Zod
+- [x] GET /api/projects/[id] detail + DELETE (hapus record & file di disk)
+- [x] POST /api/projects/upload berhasil simpan video ke **local storage** dan DB
+- [x] POST /api/projects/youtube berhasil buat project (metadata via oEmbed)
+- [x] Frontend form upload (dengan progress bar) dan import berfungsi
+- [x] Video bisa diakses & di-stream lewat `/api/files/...` (terproteksi per-user, Range support)
+- [x] Ownership isolation: user lain tidak bisa baca project/file orang lain (404)
+- [x] Error handling dasar sudah ada (validasi, status `failed`, limit 500MB)
 - [ ] Semua code ter-commit dengan baik
+
+> **Hasil test E2E (18/18 passed):** register/login (Auth.js credentials flow), 401 saat unauth,
+> create + validasi 400, upload mp4 nyata → file tertulis di disk → status `uploaded`,
+> serve file via Range (206) + tolak unauth (401), YouTube import (judul terambil dari oEmbed) +
+> tolak URL non-YouTube (400), detail, cross-user 404, list count, DELETE (record + file terhapus).
 
 ---
 
