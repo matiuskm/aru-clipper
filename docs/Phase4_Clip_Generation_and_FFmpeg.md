@@ -9,6 +9,18 @@ Fase ini fokus pada **generasi klip otomatis** dari transkrip dan analisis highl
 
 Ini adalah fase paling teknis dan "vibe" karena banyak eksperimen visual.
 
+> **⚠️ Catatan implementasi (status aktual, 2026-06-19):**
+> Fase ini sudah diimplementasikan & diverifikasi end-to-end. Penyesuaian terhadap draft di bawah:
+> 1. **Storage = lokal** (lanjutan Phase 2/3). Hasil render disimpan ke `./storage/clips/<projectId>/<clipId>.mp4` (helper `buildClipKey`/`ensureKeyPath`) dan di-serve lewat `/api/files/...` yang sudah ada (route diperluas untuk mengizinkan prefix `clips/` selain `videos/`). Bukan upload ke R2.
+> 2. **Clip TIDAK di-generate ulang di Phase 4.** Clips (start/end/score/hookText) sudah dibuat oleh analisis Gemini di Phase 3. Phase 4 fokus **rendering** clip yang sudah ada — jadi `lib/clipGenerator.ts` (step 3 draft) tidak dibuat; yang ada adalah render job + endpoint render.
+> 3. **`lib/ffmpeg.ts`** memakai binary `ffmpeg-static` (spawn argv array, bukan `exec` string — lebih aman dari shell injection). Render: cut `[start, start+duration]` → `scale`+`pad` ke **1080×1920 (9:16)** → opsional **hook overlay** (drawtext, pakai `textfile`+`expansion=none` biar bebas escaping, auto word-wrap) → opsional **subtitle burn-in** (filter `subtitles`/libass dari SRT). Font dideteksi dari sistem (Arial di macOS / DejaVu di Linux); kalau font tak ada, overlay/subtitle dilewati tapi cut+resize tetап jalan. Encode `libx264 -preset veryfast -crf 23`, `aac 128k`, `+faststart`.
+> 4. **Subtitle** dibangun dari transcript Phase 3: segmen yang overlap window clip dipotong & di-rebase ke waktu relatif clip (`cuesForWindow`).
+> 5. **Queue/worker**: job `render-clip` (`enqueueRenderClip`) di queue `video-processing` yang sama; worker dispatch by `job.name`. Clip status: `pending → rendering → completed/failed`.
+> 6. **Endpoint**: `POST /api/clips/[id]/render` (1 clip) & `POST /api/projects/[id]/render` (semua clip yang belum rendering). Keduanya Auth.js v5 + cek kepemilikan (clip → project → user).
+> 7. **Frontend**: `AnalyzePanel` di halaman detail diperluas — tombol "Render"/"Render ulang" per clip + "Render semua", preview `<video>` 9:16 saat `renderUrl` ada, dan polling status diperluas selama ada clip yang `rendering`.
+>
+> Bagian di bawah adalah draft rencana awal; baca dengan penyesuaian di atas.
+
 ## Estimasi Waktu (Vibe Coding)
 **8 – 14 hari** (tergantung seberapa dalam kamu ingin perfecting FFmpeg).
 
@@ -235,13 +247,20 @@ case 'render-clip':
 
 ## Validation Checklist (Akhir Fase)
 
-- [ ] Bisa generate 5–10 clips otomatis dari satu project
-- [ ] FFmpeg berhasil render video vertikal 9:16 dengan hook text
-- [ ] Subtitle burn-in bekerja (minimal sederhana)
-- [ ] Render result terupload ke R2 dan URL tersimpan di DB
-- [ ] Job queue processing berjalan tanpa error
-- [ ] Bisa preview clip di frontend
-- [ ] Handle error gracefully (video corrupt, FFmpeg fail, dll)
+- [x] Clips otomatis dari satu project (dibuat di Phase 3, dirender di Phase 4)
+- [x] FFmpeg render video vertikal **9:16 (1080×1920)** dengan hook text overlay
+- [x] Subtitle burn-in bekerja (libass dari transcript, di-rebase per clip)
+- [x] Hasil render tersimpan ke **local storage** dan `renderUrl` tercatat di DB
+- [x] Job queue processing (`render-clip`) berjalan tanpa error
+- [x] Bisa preview clip di frontend (tombol render + `<video>` 9:16 + polling)
+- [x] Handle error gracefully (clip status → 'failed', ffmpeg stderr di-log)
+- [ ] Code ter-commit
+
+> **Hasil test E2E (8/8 passed):** login → upload → analyze (mock) sampai `completed` (3 clips) →
+> 401 saat render unauth → render 1 clip (200+jobId) → render semua (queued 2, clip yang lagi rendering di-skip) →
+> poll sampai semua clip `completed` (~6s) → 3 file ada di `storage/clips/<pid>/` →
+> `renderUrl` ter-serve 200 & terbukti **1080×1920**, ditolak 401 saat unauth.
+> **Unit:** `renderShortClip` (output 1080×1920, 3s, h264+aac) & `cuesForWindow` (rebase + clamp). Worker log bersih (4 job completed).
 
 ---
 

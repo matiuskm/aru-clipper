@@ -26,7 +26,8 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/files/[...ke
   const key = segments.join('/');
 
   // Enforce ownership via the projectId embedded in the key.
-  if (segments[0] === 'videos' && segments[1]) {
+  // Keys are shaped `videos/<projectId>/…` or `clips/<projectId>/…`.
+  if ((segments[0] === 'videos' || segments[0] === 'clips') && segments[1]) {
     const project = await prisma.project.findFirst({
       where: { id: segments[1], userId: session.user.id },
       select: { id: true },

@@ -7,6 +7,7 @@ const STYLES: Record<string, string> = {
   queued: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300',
   transcribing: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
   analyzing: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
+  rendering: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
   completed: 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300',
   failed: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300',
 };

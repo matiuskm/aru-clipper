@@ -31,6 +31,18 @@ export function buildVideoKey(projectId: string, fileName: string): string {
   return `videos/${projectId}/${Date.now()}-${sanitizeFileName(fileName)}`;
 }
 
+/** Build the storage key for a rendered clip: `clips/<projectId>/<clipId>.mp4`. */
+export function buildClipKey(projectId: string, clipId: string): string {
+  return `clips/${projectId}/${clipId}.mp4`;
+}
+
+/** Ensure the parent directory exists and return the absolute path for a key. */
+export async function ensureKeyPath(key: string): Promise<string> {
+  const target = resolveKey(key);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  return target;
+}
+
 /** Resolve a storage key to an absolute path, guarding against traversal. */
 export function resolveKey(key: string): string {
   const target = path.resolve(STORAGE_ROOT, key);

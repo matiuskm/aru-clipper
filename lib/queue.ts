@@ -6,6 +6,7 @@ export const VIDEO_PROCESSING_QUEUE = 'video-processing';
 
 // Job names handled on the queue.
 export const ANALYZE_JOB = 'analyze';
+export const RENDER_CLIP_JOB = 'render-clip';
 
 export const videoProcessingQueue = new Queue(VIDEO_PROCESSING_QUEUE, {
   connection: redis,
@@ -20,4 +21,9 @@ export const videoProcessingQueue = new Queue(VIDEO_PROCESSING_QUEUE, {
 /** Enqueue transcription + highlight analysis for a project. */
 export function enqueueAnalyze(projectId: string) {
   return videoProcessingQueue.add(ANALYZE_JOB, { projectId });
+}
+
+/** Enqueue rendering of a single clip. */
+export function enqueueRenderClip(clipId: string) {
+  return videoProcessingQueue.add(RENDER_CLIP_JOB, { clipId });
 }

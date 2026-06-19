@@ -10,6 +10,8 @@ interface Clip {
   startSecond: number;
   endSecond: number;
   score: number;
+  status: string;
+  renderUrl: string | null;
 }
 
 const ACTIVE = ['queued', 'transcribing', 'analyzing'];
@@ -36,6 +38,9 @@ export function AnalyzePanel({
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
+  const anyRendering = clips.some((c) => c.status === 'rendering');
+  const busy = ACTIVE.includes(status);
+
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}`);
     if (!res.ok) return;
@@ -44,29 +49,42 @@ export function AnalyzePanel({
     setClips(project.clips ?? []);
   }, [projectId]);
 
-  // Poll while the pipeline is running, stop once it settles.
+  // Poll while analysis is running or any clip is rendering.
   useEffect(() => {
-    if (!ACTIVE.includes(status)) return;
+    if (!busy && !anyRendering) return;
     const t = setInterval(refresh, 2500);
     return () => clearInterval(t);
-  }, [status, refresh]);
+  }, [busy, anyRendering, refresh]);
 
-  async function start() {
+  async function post(url: string, optimistic: () => void) {
     setError(null);
     setStarting(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/analyze`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal memulai analisis');
-      setStatus('queued');
+      const res = await fetch(url, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Gagal memproses');
+      optimistic();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Gagal memulai analisis');
+      setError(e instanceof Error ? e.message : 'Gagal memproses');
     } finally {
       setStarting(false);
     }
   }
 
-  const busy = ACTIVE.includes(status);
+  const analyze = () =>
+    post(`/api/projects/${projectId}/analyze`, () => setStatus('queued'));
+
+  const renderAll = () =>
+    post(`/api/projects/${projectId}/render`, () =>
+      setClips((cs) => cs.map((c) => ({ ...c, status: 'rendering' })))
+    );
+
+  const renderOne = (clipId: string) =>
+    post(`/api/clips/${clipId}/render`, () =>
+      setClips((cs) =>
+        cs.map((c) => (c.id === clipId ? { ...c, status: 'rendering' } : c))
+      )
+    );
 
   return (
     <section className="rounded-xl border border-black/10 p-5 dark:border-white/15">
@@ -74,8 +92,17 @@ export function AnalyzePanel({
         <h2 className="font-medium">Clips ({clips.length})</h2>
         <div className="flex items-center gap-3">
           {busy && <StatusBadge status={status} />}
+          {clips.length > 0 && (
+            <button
+              onClick={renderAll}
+              disabled={busy || anyRendering || starting}
+              className="rounded-md border border-black/15 px-3 py-1.5 text-sm font-medium disabled:opacity-50 dark:border-white/20"
+            >
+              {anyRendering ? 'Merender…' : 'Render semua'}
+            </button>
+          )}
           <button
-            onClick={start}
+            onClick={analyze}
             disabled={!hasVideo || busy || starting}
             className="rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background disabled:opacity-50"
             title={hasVideo ? '' : 'Hanya untuk video yang sudah diupload'}
@@ -108,31 +135,51 @@ export function AnalyzePanel({
             : 'Clips hanya tersedia untuk video yang diupload (Phase berikutnya: import YouTube).'}
         </p>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="grid gap-3 sm:grid-cols-2">
           {clips
             .slice()
             .sort((a, b) => b.score - a.score)
             .map((c) => (
               <li
                 key={c.id}
-                className="rounded-lg border border-black/10 p-3 dark:border-white/15"
+                className="flex flex-col gap-2 rounded-lg border border-black/10 p-3 dark:border-white/15"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-medium">{c.title}</p>
-                    {c.hookText && (
-                      <p className="mt-1 text-sm text-black/60 dark:text-white/60">
-                        “{c.hookText}”
-                      </p>
-                    )}
+                {c.renderUrl ? (
+                  <video
+                    src={c.renderUrl}
+                    controls
+                    className="aspect-[9/16] w-full rounded bg-black"
+                  />
+                ) : (
+                  <div className="flex aspect-[9/16] w-full items-center justify-center rounded bg-black/5 text-xs text-black/40 dark:bg-white/5 dark:text-white/40">
+                    {c.status === 'rendering' ? 'Merender…' : 'Belum dirender'}
                   </div>
+                )}
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium">{c.title}</p>
                   <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
                     {c.score}
                   </span>
                 </div>
-                <p className="mt-2 text-xs text-black/50 dark:text-white/50">
-                  {fmt(c.startSecond)} – {fmt(c.endSecond)} · {c.endSecond - c.startSecond}s
-                </p>
+                {c.hookText && (
+                  <p className="text-sm text-black/60 dark:text-white/60">“{c.hookText}”</p>
+                )}
+                <div className="mt-auto flex items-center justify-between pt-1">
+                  <span className="text-xs text-black/50 dark:text-white/50">
+                    {fmt(c.startSecond)} – {fmt(c.endSecond)} · {c.endSecond - c.startSecond}s
+                  </span>
+                  <button
+                    onClick={() => renderOne(c.id)}
+                    disabled={c.status === 'rendering' || starting}
+                    className="rounded border border-black/15 px-2 py-1 text-xs disabled:opacity-50 dark:border-white/20"
+                  >
+                    {c.status === 'rendering'
+                      ? 'Merender…'
+                      : c.renderUrl
+                        ? 'Render ulang'
+                        : 'Render'}
+                  </button>
+                </div>
               </li>
             ))}
         </ul>

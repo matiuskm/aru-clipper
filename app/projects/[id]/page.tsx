@@ -122,6 +122,8 @@ export default async function ProjectDetailPage({
           startSecond: c.startSecond,
           endSecond: c.endSecond,
           score: c.score,
+          status: c.status,
+          renderUrl: c.renderUrl,
         }))}
       />
     </main>

@@ -1,8 +1,9 @@
 // lib/worker.ts
 import { Worker } from 'bullmq';
 import { redis } from './redis';
-import { VIDEO_PROCESSING_QUEUE, ANALYZE_JOB } from './queue';
+import { VIDEO_PROCESSING_QUEUE, ANALYZE_JOB, RENDER_CLIP_JOB } from './queue';
 import { processAnalyzeJob } from './jobs/analyze-job';
+import { processRenderClipJob } from './jobs/render-clip-job';
 
 export const videoWorker = new Worker(
   VIDEO_PROCESSING_QUEUE,
@@ -12,6 +13,8 @@ export const videoWorker = new Worker(
     switch (job.name) {
       case ANALYZE_JOB:
         return processAnalyzeJob(job);
+      case RENDER_CLIP_JOB:
+        return processRenderClipJob(job);
       default:
         console.warn(`No handler for job "${job.name}" — skipping`);
         return { success: true, skipped: true };
