@@ -121,7 +121,7 @@ export function NewProjectForm() {
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       {tab === 'upload' ? (
-        <form onSubmit={handleUpload} className="space-y-4">
+        <form key="upload" onSubmit={handleUpload} className="space-y-4">
           <input
             className={inputCls}
             placeholder="Judul project"
@@ -151,7 +151,7 @@ export function NewProjectForm() {
           </button>
         </form>
       ) : (
-        <form onSubmit={handleYoutube} className="space-y-4">
+        <form key="youtube" onSubmit={handleYoutube} className="space-y-4">
           <input
             className={inputCls}
             placeholder="https://youtube.com/watch?v=…"
