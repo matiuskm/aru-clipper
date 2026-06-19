@@ -80,68 +80,120 @@ function wrapText(text: string, maxChars = 22): string {
   return lines.join('\n');
 }
 
-function srtTime(sec: number): string {
+function assTime(sec: number): string {
   const s = Math.max(0, sec);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const ss = Math.floor(s % 60);
-  const ms = Math.round((s % 1) * 1000);
+  const cs = Math.round((s % 1) * 100);
   const p = (n: number, l = 2) => String(n).padStart(l, '0');
-  return `${p(h)}:${p(m)}:${p(ss)},${p(ms, 3)}`;
+  return `${h}:${p(m)}:${p(ss)}.${p(cs)}`;
 }
 
-function buildSrt(cues: SubtitleCue[]): string {
-  return cues
+/**
+ * Split long cues into short caption chunks (~max words) so on-screen text
+ * stays to 1-2 lines and doesn't jump around. Time is shared across chunks.
+ */
+export function chunkCues(cues: SubtitleCue[], maxWords = 6): SubtitleCue[] {
+  const out: SubtitleCue[] = [];
+  for (const c of cues) {
+    const words = c.text.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+    const groups: string[] = [];
+    for (let i = 0; i < words.length; i += maxWords) {
+      groups.push(words.slice(i, i + maxWords).join(' '));
+    }
+    const per = (c.end - c.start) / groups.length;
+    groups.forEach((text, i) => {
+      out.push({ start: c.start + i * per, end: c.start + (i + 1) * per, text });
+    });
+  }
+  return out;
+}
+
+/**
+ * Build an ASS subtitle file with a fixed 1080x1920 script resolution so the
+ * font size is predictable (not auto-scaled huge) and captions are pinned to a
+ * fixed band near the bottom.
+ */
+function buildAss(cues: SubtitleCue[], fontName: string): string {
+  const escape = (t: string) => t.replace(/[\r\n]+/g, ' ').replace(/\{/g, '(').replace(/\}/g, ')');
+  const header = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${OUTPUT_W}
+PlayResY: ${OUTPUT_H}
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
+Style: Default,${fontName},58,&H00FFFFFF,&H00000000,&H64000000,1,4,0,2,120,120,320
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;
+  const events = cues
+    .filter((c) => c.end > c.start && c.text.trim())
     .map(
-      (c, i) =>
-        `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text.trim()}`
+      (c) =>
+        `Dialogue: 0,${assTime(c.start)},${assTime(c.end)},Default,,0,0,0,,${escape(c.text.trim())}`
     )
-    .join('\n\n');
+    .join('\n');
+  return `${header}\n${events}\n`;
 }
 
 /**
  * Render a clip. Returns the output path. Caller owns input/output paths.
- * Temp files (hook text, subtitle srt) are cleaned up automatically.
+ * Layout: the source video full-width centered over a blurred fill of itself
+ * (no black bars), with optional burned-in captions and a hook headline.
  */
 export async function renderShortClip(opts: RenderOptions): Promise<string> {
   const { inputPath, outputPath, start, duration, hookText, subtitles = [] } = opts;
   const font = findFont();
   const tmp: string[] = [];
 
-  // Base: vertical letterbox/pad to 1080x1920.
-  let vf = `scale=${OUTPUT_W}:${OUTPUT_H}:force_original_aspect_ratio=decrease,pad=${OUTPUT_W}:${OUTPUT_H}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+  // Blurred-background fill: split input → blurred cover behind, real video on top.
+  const steps: string[] = [
+    `[0:v]split=2[bg][fg]`,
+    `[bg]scale=${OUTPUT_W}:${OUTPUT_H}:force_original_aspect_ratio=increase,crop=${OUTPUT_W}:${OUTPUT_H},gblur=sigma=24,eq=brightness=-0.08[bgb]`,
+    `[fg]scale=${OUTPUT_W}:-2[fgs]`,
+    `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1[v0]`,
+  ];
+  let last = 'v0';
 
-  // Subtitles burn-in (libass) — needs a font present.
+  // Captions (ASS via libass) — fixed size + bottom band, chunked to short lines.
   if (subtitles.length > 0 && font) {
-    const srtPath = path.join(os.tmpdir(), `clipper-sub-${Date.now()}-${process.pid}.srt`);
-    await fs.writeFile(srtPath, buildSrt(subtitles));
-    tmp.push(srtPath);
-    const fontsDir = path.dirname(font);
+    const assPath = path.join(os.tmpdir(), `clipper-sub-${Date.now()}-${process.pid}.ass`);
     const fontName = path.basename(font).replace(/\.[^.]+$/, '');
-    vf +=
-      `,subtitles=${escapeFilterPath(srtPath)}:fontsdir=${escapeFilterPath(fontsDir)}` +
-      `:force_style='FontName=${fontName},FontSize=16,PrimaryColour=&H00FFFFFF,` +
-      `OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=0,Alignment=2,MarginV=120'`;
+    await fs.writeFile(assPath, buildAss(chunkCues(subtitles), fontName));
+    tmp.push(assPath);
+    steps.push(
+      `[${last}]subtitles=${escapeFilterPath(assPath)}:fontsdir=${escapeFilterPath(path.dirname(font))}[v1]`
+    );
+    last = 'v1';
   }
 
-  // Hook headline overlay near the top — use textfile to avoid escaping hell.
+  // Hook headline near the top — textfile avoids filtergraph escaping issues.
   if (hookText && font) {
     const hookPath = path.join(os.tmpdir(), `clipper-hook-${Date.now()}-${process.pid}.txt`);
-    await fs.writeFile(hookPath, wrapText(hookText));
+    await fs.writeFile(hookPath, wrapText(hookText, 24));
     tmp.push(hookPath);
-    vf +=
-      `,drawtext=fontfile=${escapeFilterPath(font)}:textfile=${escapeFilterPath(hookPath)}` +
-      `:expansion=none:fontcolor=white:fontsize=64:line_spacing=10` +
-      `:box=1:boxcolor=black@0.55:boxborderw=24` +
-      `:x=(w-text_w)/2:y=140`;
+    steps.push(
+      `[${last}]drawtext=fontfile=${escapeFilterPath(font)}:textfile=${escapeFilterPath(hookPath)}` +
+        `:expansion=none:fontcolor=white:fontsize=56:line_spacing=12` +
+        `:box=1:boxcolor=black@0.5:boxborderw=22:x=(w-text_w)/2:y=130[v2]`
+    );
+    last = 'v2';
   }
+
+  const filterComplex = steps.join(';');
 
   try {
     await run([
       '-ss', String(start),
       '-i', inputPath,
       '-t', String(duration),
-      '-vf', vf,
+      '-filter_complex', filterComplex,
+      '-map', `[${last}]`,
+      '-map', '0:a?',
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '23',

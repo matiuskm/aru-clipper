@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { buildVideoKey, saveFile, publicUrl } from '@/lib/storage';
 
 // MVP cap — keep uploads modest while running on local disk.
-const MAX_BYTES = 500 * 1024 * 1024; // 500 MB
+const MAX_BYTES = 1024 * 1024 * 1024; // 1 GB
 const ACCEPTED = /^video\//;
 
 export async function POST(req: NextRequest) {

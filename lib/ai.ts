@@ -102,7 +102,37 @@ Aturan:
 - Durasi tiap clip antara 15-60 detik (kecuali video lebih pendek; sesuaikan).
 - Prioritaskan momen emosional, mengejutkan, insightful, atau berpotensi viral.
 - Hindari overlap antar clip.
-- start/end harus dalam rentang 0..${durationSec}.`;
+- start/end harus dalam rentang 0..${durationSec}.
+- PENTING: clip harus berisi pemikiran/kalimat yang UTUH. "start" = "start" dari segmen
+  tempat ide dimulai; "end" = "end" dari segmen tempat kalimat/ide itu SELESAI.
+  Jangan memotong di tengah kalimat — pastikan kalimat terakhir tuntas.`;
+}
+
+/**
+ * Snap a clip's boundaries to transcript segment edges so we don't cut mid-word
+ * or mid-sentence. start → start of the segment it falls in; end → end of the
+ * segment that contains/extends past the requested end (with a small tail pad).
+ */
+export function snapToSegments(
+  h: Highlight,
+  segments: Segment[],
+  durationSec: number,
+  tailPad = 0.4
+): Highlight {
+  if (segments.length === 0) return h;
+
+  // Start: the segment that contains h.start, else the nearest segment start <= h.start.
+  const startSeg =
+    [...segments].reverse().find((s) => s.start <= h.start) ?? segments[0];
+  // End: the segment that contains h.end, else the last segment ending after h.start.
+  const endSeg =
+    segments.find((s) => s.end >= h.end && s.start <= h.end) ??
+    [...segments].reverse().find((s) => s.start < h.end) ??
+    startSeg;
+
+  const start = Math.max(0, Math.floor(startSeg.start));
+  const end = Math.min(durationSec || h.end, Math.ceil(endSeg.end + tailPad));
+  return { ...h, start, end: Math.max(start + 1, end) };
 }
 
 /** Analyze a transcript and return scored highlight clips. */
@@ -134,7 +164,10 @@ export async function analyzeHighlights(
   };
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
-  return parseHighlights(text, durationSec);
+  // Align AI boundaries to transcript segments so speech isn't cut mid-sentence.
+  return parseHighlights(text, durationSec).map((h) =>
+    snapToSegments(h, transcript, durationSec)
+  );
 }
 
 /** Parse + sanitize the model's JSON output into valid Highlights. */

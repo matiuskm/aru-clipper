@@ -1,9 +1,43 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { Readable } from 'stream';
+import type { ReadStream } from 'fs';
 import path from 'path';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { statFile, readStream } from '@/lib/storage';
+
+// Wrap a Node read stream as a web ReadableStream that tears down the file
+// handle when the client aborts (e.g. video seeking), avoiding the
+// "Controller is already closed" crash from blind enqueue-after-close.
+function toWebStream(node: ReadStream): ReadableStream<Uint8Array> {
+  let closed = false;
+  return new ReadableStream({
+    start(controller) {
+      node.on('data', (chunk: string | Buffer) => {
+        if (closed) return;
+        controller.enqueue(new Uint8Array(chunk as Buffer));
+        // Pause to respect backpressure; resumed on pull().
+        node.pause();
+      });
+      node.on('end', () => {
+        if (closed) return;
+        closed = true;
+        controller.close();
+      });
+      node.on('error', (err) => {
+        if (closed) return;
+        closed = true;
+        controller.error(err);
+      });
+    },
+    pull() {
+      node.resume();
+    },
+    cancel() {
+      closed = true;
+      node.destroy();
+    },
+  });
+}
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4',
@@ -60,7 +94,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/files/[...ke
         });
       }
       const nodeStream = readStream(key, { start, end });
-      return new NextResponse(Readable.toWeb(nodeStream) as ReadableStream, {
+      return new NextResponse(toWebStream(nodeStream), {
         status: 206,
         headers: {
           'Content-Type': contentType,
@@ -73,7 +107,7 @@ export async function GET(req: NextRequest, ctx: RouteContext<'/api/files/[...ke
   }
 
   const nodeStream = readStream(key);
-  return new NextResponse(Readable.toWeb(nodeStream) as ReadableStream, {
+  return new NextResponse(toWebStream(nodeStream), {
     status: 200,
     headers: {
       'Content-Type': contentType,

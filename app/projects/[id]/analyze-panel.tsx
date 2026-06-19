@@ -40,6 +40,18 @@ export function AnalyzePanel({
 
   const anyRendering = clips.some((c) => c.status === 'rendering');
   const busy = ACTIVE.includes(status);
+  const [elapsed, setElapsed] = useState(0);
+
+  // Count seconds elapsed while a stage is running, reset when idle.
+  useEffect(() => {
+    if (!busy && !anyRendering) return;
+    const startedAt = Date.now();
+    const t = setInterval(
+      () => setElapsed(Math.floor((Date.now() - startedAt) / 1000)),
+      1000
+    );
+    return () => clearInterval(t);
+  }, [busy, anyRendering, status]);
 
   const refresh = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}`);
@@ -118,14 +130,12 @@ export function AnalyzePanel({
 
       {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
 
-      {busy && (
-        <p className="mb-3 text-sm text-black/60 dark:text-white/60">
-          {status === 'transcribing'
-            ? 'Mentranskripsi audio…'
-            : status === 'analyzing'
-              ? 'Menganalisis highlight…'
-              : 'Menunggu antrian…'}
-        </p>
+      {(busy || anyRendering) && (
+        <Progress
+          status={busy ? status : 'rendering'}
+          elapsed={elapsed}
+          rendering={anyRendering ? clips.filter((c) => c.status === 'rendering').length : 0}
+        />
       )}
 
       {clips.length === 0 ? (
@@ -185,5 +195,67 @@ export function AnalyzePanel({
         </ul>
       )}
     </section>
+  );
+}
+
+// Stepper showing which stage the pipeline is on, with a spinner + elapsed time.
+const STEPS = [
+  { key: 'queued', label: 'Antrian' },
+  { key: 'transcribing', label: 'Transkrip audio' },
+  { key: 'analyzing', label: 'Analisis highlight' },
+  { key: 'rendering', label: 'Render clips' },
+];
+
+function Progress({
+  status,
+  elapsed,
+  rendering,
+}: {
+  status: string;
+  elapsed: number;
+  rendering: number;
+}) {
+  const current = STEPS.findIndex((s) => s.key === status);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+
+  return (
+    <div className="mb-4 rounded-lg border border-black/10 p-3 dark:border-white/15">
+      <div className="mb-3 flex items-center gap-2 text-sm">
+        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+        <span className="font-medium">
+          {status === 'rendering'
+            ? `Merender ${rendering} clip…`
+            : STEPS[current]?.label + '…'}
+        </span>
+        <span className="ml-auto tabular-nums text-black/50 dark:text-white/50">
+          {mm}:{ss}
+        </span>
+      </div>
+      <ol className="flex gap-1">
+        {STEPS.map((s, i) => (
+          <li
+            key={s.key}
+            className={`h-1.5 flex-1 rounded-full ${
+              i < current
+                ? 'bg-green-500'
+                : i === current
+                  ? 'bg-foreground'
+                  : 'bg-black/10 dark:bg-white/15'
+            }`}
+            title={s.label}
+          />
+        ))}
+      </ol>
+      <p className="mt-2 text-xs text-black/45 dark:text-white/45">
+        {status === 'queued'
+          ? 'Menunggu worker… (pastikan worker berjalan: npm run dev:full)'
+          : status === 'transcribing'
+            ? 'Untuk video panjang, tahap ini bisa beberapa menit.'
+            : status === 'analyzing'
+              ? 'AI sedang memilih momen terbaik…'
+              : 'Memotong & menyusun video vertikal 9:16…'}
+      </p>
+    </div>
   );
 }
